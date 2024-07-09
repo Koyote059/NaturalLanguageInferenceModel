@@ -1,8 +1,10 @@
+import logging
 from abc import ABC
 
 from transformers import RobertaTokenizer, DistilBertTokenizer
 from transformers.tokenization_utils_base import TruncationStrategy
 
+logging.disable(logging.WARNING)
 
 class NLITokenizer(ABC):
     def tokenize(self, premise: str, hypothesis: str = None):
@@ -29,7 +31,7 @@ class NLIDistilBertTokenizer(NLITokenizer):
 
     def tokenize(self, premise: str, hypothesis: str = None):
         tokens = self.tokenizer(premise, hypothesis, return_tensors='pt', padding=True,
-                                truncation=TruncationStrategy.LONGEST_FIRST)
+                                truncation=TruncationStrategy.LONGEST_FIRST,)
         return tokens["input_ids"].squeeze(0), tokens["attention_mask"].squeeze(0)
 
     def decode(self, token):

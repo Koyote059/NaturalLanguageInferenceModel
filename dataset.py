@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import random
 
 import nltk
@@ -9,7 +10,7 @@ from nltk import pos_tag
 from torch.utils.data import Dataset
 
 from augmentation import AugmentationPipeline, RandomHypothesisSubstitution, HypernymySubstitution, \
-    VerbSynonymSubstitution, AdverbInversion, DateSubstitution, VerbNegation
+    VerbSynonymSubstitution, VerbNegation, PremiseSummarization
 from tokenizer import NLITokenizer, NLIDistilBertTokenizer
 
 _dataset = load_dataset("tommasobonomo/sem_augmented_fever_nli")
@@ -26,7 +27,7 @@ class NLIaFeverDataset(Dataset):
         :param split: possible values: train, test, valid.
         """
         if split not in ['train', 'test', 'validation']:
-            raise ValueError(f'Split {split} is not valid. Possible values: train, test, valid.')
+            raise ValueError(f'Split {split} is not valid. Possible values: train, test, validation.')
         self.split = split
         self.dataset = _dataset[split]
         self.tokenizer = tokenizer
@@ -123,17 +124,17 @@ class AugmentedNLIaFeverTestDataset(NLIaFeverDataset):
 
 
 ADVERSARIAL_DATASETS = {
-    'test': 'augmented_train.jsonl',
+    'test': 'augmented_test.jsonl',
     'train': 'augmented_train.jsonl',
-    'valid': 'augmented_valid.jsonl',
+    'validation': 'augmented_valid.jsonl',
 }
 
 
 class AdversarialNLIaFeverDataset(NLIaFeverDataset):
 
-    def __init__(self, split: str, tokenizer: NLITokenizer = NLIDistilBertTokenizer()):
+    def __init__(self, directory: str, split: str, tokenizer: NLITokenizer = NLIDistilBertTokenizer()):
         super(AdversarialNLIaFeverDataset, self).__init__(split, tokenizer)
-        file_path = ADVERSARIAL_DATASETS[self.split]
+        file_path = os.path.join(directory, ADVERSARIAL_DATASETS[self.split])
         self.dataset = []
         with open(file_path, 'r') as f:
             for line in f:
@@ -143,9 +144,9 @@ class AdversarialNLIaFeverDataset(NLIaFeverDataset):
 
 class AdversarialMaskedAFeverDataset(MaskedAFeverDataset):
 
-    def __init__(self, split: str, tokenizer: NLITokenizer = NLIDistilBertTokenizer()):
+    def __init__(self, directory: str, split: str, tokenizer: NLITokenizer = NLIDistilBertTokenizer()):
         super(MaskedAFeverDataset, self).__init__(split, tokenizer)
-        file_path = ADVERSARIAL_DATASETS[self.split]
+        file_path = os.path.join(directory, ADVERSARIAL_DATASETS[self.split])
         self.dataset = []
         with open(file_path, 'r') as f:
             for line in f:
@@ -153,24 +154,31 @@ class AdversarialMaskedAFeverDataset(MaskedAFeverDataset):
                 self.dataset.append(record)
 
 
-def augment_datasets():
-    pipeline = AugmentationPipeline({
-        RandomHypothesisSubstitution(_dataset): 0.1,
-        HypernymySubstitution(): 0.9,
-        VerbSynonymSubstitution(): 0.8,
-        AdverbInversion(): 1,
-        DateSubstitution(): 1.5,
-        VerbNegation(): 0.2
-    })
+def augment_datasets(directory: str, verbose=1):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
     for split in _dataset:
-        with open(ADVERSARIAL_DATASETS[split], 'w') as file:
-            for record in _dataset[split]:
-                seed = random.random()
-                if seed < 0.35:
-                    augmented_record = pipeline(record)
-                    if augmented_record is not None:
-                        file.write(json.dumps(augmented_record) + '\n')
-                    if seed < 0.7:
-                        file.write(json.dumps(record) + '\n')
-                else:
-                    file.write(json.dumps(record) + '\n')
+
+        pipeline = AugmentationPipeline(priority_methods={
+            VerbNegation(): 1,
+            HypernymySubstitution(): 0.5,
+            VerbSynonymSubstitution(): 0.3,
+            # AdverbInversion(): 1,
+            # DateSubstitution(): 1.5,
+        }, secondary_methods={
+            RandomHypothesisSubstitution(_dataset[split]): 1,
+            PremiseSummarization(): 0.5,
+        })
+
+        file_path = os.path.join(directory, ADVERSARIAL_DATASETS[split])
+        if verbose:
+            print("Creating file: {}".format(file_path))
+        with open(file_path, 'w') as file:
+            for i, record in enumerate(_dataset[split]):
+                if verbose > 1:
+                    print(f"Augmenting record {i + 1} / {len(_dataset[split])}")
+                augmented_record = pipeline(record)
+                if augmented_record is None:
+                    continue
+                file.write(json.dumps(augmented_record) + '\n')

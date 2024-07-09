@@ -6,6 +6,7 @@ from typing import Any, Tuple, List, Dict
 import spacy
 from datasets import load_dataset
 from nltk.corpus import wordnet
+from transformers import pipeline
 
 
 # TODO could use NN to transform verbs in correct tense
@@ -404,21 +405,43 @@ class VerbSynonymSubstitution(AugmentationMethod):
         return new_record
 
 
+class PremiseSummarization(AugmentationMethod):
+
+    def __init__(self, model="sshleifer/distilbart-cnn-12-6"):
+        self.summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+
+    def augment(self, record: dict):
+        premise = record['premise']
+        premise_length = len(premise.split(" ")) * 0.75
+        min_length = int(premise_length * 0.50)
+        max_length = int(premise_length * 0.75)
+        summarized_premise = self.summarizer(premise, min_length=min_length, max_length=max_length, do_sample=False)
+        if len(summarized_premise) == 0:
+            return None
+        summarized_premise = summarized_premise[0]['summary_text']
+        new_record = record.copy()
+        new_record['premise'] = summarized_premise
+        return new_record
+
+
 class AugmentationPipeline:
 
-    def __init__(self, augmentation_methods: Dict[AugmentationMethod, float]):
-        self.augmentation_methods = augmentation_methods
+    def __init__(self, priority_methods: Dict[AugmentationMethod, float],
+                 secondary_methods: Dict[AugmentationMethod, float]):
+        self.priority_methods = priority_methods
+        self.secondary_methods = secondary_methods
 
     def choose_methods(self) -> List[AugmentationMethod]:
         chosen_methods = []
-        keys = list(self.augmentation_methods.keys())
-        probabilities = list(self.augmentation_methods.values())
-        while keys:
-            method = random.choices(keys, probabilities, k=1)[0]
-            index = keys.index(method)
-            chosen_methods.append(method)
-            del keys[index]
-            del probabilities[index]
+        for augmentation_methods in [self.priority_methods, self.secondary_methods]:
+            keys = list(augmentation_methods.keys())
+            probabilities = list(augmentation_methods.values())
+            while keys:
+                method = random.choices(keys, probabilities, k=1)[0]
+                index = keys.index(method)
+                chosen_methods.append(method)
+                del keys[index]
+                del probabilities[index]
 
         return chosen_methods
 
@@ -428,9 +451,7 @@ class AugmentationPipeline:
     def augment(self, record: dict) -> dict | None:
         methods = self.choose_methods()
         for method in methods:
-            print("Trying method: ", method.__class__.__name__)
             augmented_record = method.augment(record)
             if augmented_record:
                 return augmented_record
         return None
-
