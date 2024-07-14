@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Tuple, Dict, Optional, List
 import seaborn as sns
@@ -174,7 +174,7 @@ class ClassificationTrainer(ABC):
             train_loss = 0.0
             for i, batch in enumerate(train_dataloader):
                 if verbose > 2:
-                    print(f"\tBatch: {i+1}/{len(train_dataloader)}")
+                    print(f"\tBatch: {i + 1}/{len(train_dataloader)}")
                 self.optimizer.zero_grad()
                 loss, _, _ = self.train_batch(batch, self.model, self.device)
                 loss.backward()
@@ -277,6 +277,7 @@ class ClassificationTrainer(ABC):
 
         return accuracy, precision, recall, f1, conf_matrix
 
+    @abstractmethod
     def train_batch(self, batch, model, device) -> Tuple[_WeightedLoss, list[np.ndarray], list[np.ndarray]]:
         """
         Function to extend to make the class model-specific.
